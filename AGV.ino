@@ -9,7 +9,7 @@
 const char* WIFI_SSID = "S25 de Thiago";
 const char* WIFI_PASSWORD = "thiagoraia";
 
-const char* SERVER_IP = "10.130.52.31";
+const char* SERVER_IP = "10.130.52.125";
 const int SERVER_PORT = 3000;
 
 WebSocketsClient webSocket;
@@ -19,7 +19,7 @@ WebSocketsClient webSocket;
 // =====================================================
 
 #define IR_SENSOR_RIGHT 33
-#define IR_SENSOR_LEFT 32
+#define IR_SENSOR_LEFT  32
 
 #define MOTOR_SPEED 160
 
@@ -36,11 +36,10 @@ WebSocketsClient webSocket;
 // O estoque corresponde a quarta marcacao fisica.
 
 const int MAX_ESTACOES = 4;
-const int TOTAL_MARCACOES = 4;
 const int MARCACAO_ESTOQUE = 4;
 
 // =====================================================
-// LEDS
+// LEDS DE STATUS DO AGV
 // =====================================================
 
 const int parado = 2;
@@ -103,26 +102,53 @@ const unsigned long TEMPO_PARADA = 2000;
 // =====================================================
 
 void rotateMotor(int rightMotorSpeed, int leftMotorSpeed);
+
 void apagarLeds();
 
 void receberRota(uint8_t* payload, size_t length);
 
+void enviarProximaEstacao();
+
 void webSocketEvent(
   WStype_t type,
   uint8_t* payload,
-  size_t length);
+  size_t length
+);
 
 void verificarEstacao(int rightSensor, int leftSensor);
+
 void controlarAGV();
 
 // =====================================================
-// CONTROLE DOS LEDS
+// CONTROLE DOS LEDS DO AGV
 // =====================================================
 
 void apagarLeds() {
   digitalWrite(parado, LOW);
   digitalWrite(virando, LOW);
   digitalWrite(reto, LOW);
+}
+
+// =====================================================
+// ENVIA A PROXIMA ESTACAO PARA O SERVIDOR
+// =====================================================
+
+void enviarProximaEstacao() {
+
+  int proximaEstacao;
+
+  if (indiceRota >= quantidadeEstacoes) {
+    proximaEstacao = 0;
+  } else {
+    proximaEstacao = rota[indiceRota];
+  }
+
+  String mensagem = "ESTACAO:" + String(proximaEstacao);
+
+  webSocket.sendTXT(mensagem);
+
+  Serial.print("[WEBSOCKET] Proxima estacao enviada: ");
+  Serial.println(mensagem);
 }
 
 // =====================================================
@@ -170,7 +196,10 @@ void receberRota(uint8_t* payload, size_t length) {
     valor.trim();
 
     if (
-      valor.length() != 1 || valor[0] < '1' || valor[0] > '3') {
+      valor.length() != 1 ||
+      valor[0] < '1' ||
+      valor[0] > '3'
+    ) {
       Serial.println("[ERRO] Estacao invalida! Utilize 1, 2 ou 3.");
       return;
     }
@@ -179,7 +208,9 @@ void receberRota(uint8_t* payload, size_t length) {
 
     // Exige ordem crescente e nao permite repeticoes.
     if (
-      novaQuantidade > 0 && estacao <= novaRota[novaQuantidade - 1]) {
+      novaQuantidade > 0 &&
+      estacao <= novaRota[novaQuantidade - 1]
+    ) {
       Serial.println("[ERRO] Ordem das estacoes invalida!");
       return;
     }
@@ -271,7 +302,11 @@ void receberRota(uint8_t* payload, size_t length) {
 
   Serial.println("================================");
 
+  // Confirma recebimento da rota.
   webSocket.sendTXT("ROTA_RECEBIDA");
+
+  // Informa ao servidor a primeira estacao.
+  enviarProximaEstacao();
 }
 
 // =====================================================
@@ -281,7 +316,8 @@ void receberRota(uint8_t* payload, size_t length) {
 void webSocketEvent(
   WStype_t type,
   uint8_t* payload,
-  size_t length) {
+  size_t length
+) {
 
   switch (type) {
 
@@ -392,6 +428,9 @@ void verificarEstacao(int rightSensor, int leftSensor) {
     // Avanca para o proximo destino da rota.
     indiceRota++;
 
+    // Informa ao servidor qual sera o proximo destino.
+    enviarProximaEstacao();
+
     // Inicia o tempo de parada.
     tempoInicioParada = millis();
 
@@ -403,7 +442,8 @@ void verificarEstacao(int rightSensor, int leftSensor) {
     digitalWrite(parado, HIGH);
 
     webSocket.sendTXT(
-      "PARADA_REALIZADA:" + String(destinoAtual));
+      "PARADA_REALIZADA:" + String(destinoAtual)
+    );
 
   } else {
 
@@ -656,7 +696,8 @@ void setup() {
   webSocket.begin(
     SERVER_IP,
     SERVER_PORT,
-    "/");
+    "/"
+  );
 
   webSocket.onEvent(webSocketEvent);
 
@@ -751,9 +792,11 @@ void rotateMotor(int rightMotorSpeed, int leftMotorSpeed) {
 
   analogWrite(
     enableRightMotor,
-    constrain(abs(rightMotorSpeed), 0, 255));
+    constrain(abs(rightMotorSpeed), 0, 255)
+  );
 
   analogWrite(
     enableLeftMotor,
-    constrain(abs(leftMotorSpeed), 0, 255));
+    constrain(abs(leftMotorSpeed), 0, 255)
+  );
 }

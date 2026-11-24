@@ -9,12 +9,19 @@ const readline = require("readline");
 const PORT = 3000;
 
 const server = new WebSocket.Server({
-  host: "0.0.0.0",
-  port: PORT,
+    host: "0.0.0.0",
+    port: PORT,
 });
 
-let esp32 = null;
+// Conexões dos ESP32
+let esp32AGV = null;
+let esp32LEDs = null;
+
+// Controle da rota
 let rotaAtual = [];
+
+// Última estação informada pelo AGV
+let ultimaEstacao = null;
 
 // =====================================================
 // INICIALIZAÇÃO
@@ -25,36 +32,59 @@ console.log("SERVIDOR AGV");
 console.log("================================");
 
 server.on("listening", () => {
-  console.log(`[OK] Servidor iniciado na porta ${PORT}`);
-  console.log("[AGUARDANDO] Conexao do ESP32...");
+    console.log(`[OK] Servidor iniciado na porta ${PORT}`);
+    console.log("[AGUARDANDO] Conexoes dos ESP32...");
 });
 
 server.on("error", (error) => {
-  console.log("[ERRO] Servidor:", error.message);
+    console.log("[ERRO] Servidor:", error.message);
 });
 
 // =====================================================
-// ENVIO DA ROTA
+// ENVIO DA ROTA PARA O AGV
 // =====================================================
 
 function enviarRota() {
 
-  if (!esp32 || esp32.readyState !== WebSocket.OPEN) {
-    console.log("[AGUARDANDO] ESP32 nao conectado. Rota armazenada.");
-    return;
-  }
+    if (!esp32AGV || esp32AGV.readyState !== WebSocket.OPEN) {
+        console.log("[AGUARDANDO] AGV nao conectado. Rota armazenada.");
+        return;
+    }
 
-  if (rotaAtual.length === 0) {
-    console.log("[ERRO] Nenhuma rota definida.");
-    return;
-  }
+    if (rotaAtual.length === 0) {
+        console.log("[ERRO] Nenhuma rota definida.");
+        return;
+    }
 
-  const mensagem = `ROTA:${rotaAtual.join(",")}`;
+    const mensagem = `ROTA:${rotaAtual.join(",")}`;
 
-  esp32.send(mensagem);
+    esp32AGV.send(mensagem);
 
-  console.log("--------------------------------");
-  console.log("[ENVIO] Rota enviada ao ESP32:", mensagem);
+    console.log("--------------------------------");
+    console.log("[ENVIO AGV]", mensagem);
+}
+
+// =====================================================
+// ENCAMINHAR ESTAÇÃO PARA O ESP32 DOS LEDs
+// =====================================================
+
+function enviarEstacaoParaLEDs(estacao) {
+
+    const mensagem = `ESTACAO:${estacao}`;
+
+    // Guarda a última estação para atualizar os LEDs
+    // caso o ESP32 dos LEDs reconecte.
+    ultimaEstacao = estacao;
+
+    if (!esp32LEDs || esp32LEDs.readyState !== WebSocket.OPEN) {
+        console.log("[AGUARDANDO] ESP32 dos LEDs nao conectado.");
+        console.log("[ARMAZENADO]", mensagem);
+        return;
+    }
+
+    esp32LEDs.send(mensagem);
+
+    console.log("[ENVIO LEDs]", mensagem);
 }
 
 // =====================================================
@@ -63,98 +93,184 @@ function enviarRota() {
 
 function definirRota(estacoes) {
 
-  const valida =
-    Array.isArray(estacoes) &&
-    estacoes.length > 0 &&
-    estacoes.length <= 3 &&
-    estacoes.every((estacao, index) => {
-      return (
-        Number.isInteger(estacao) &&
-        estacao >= 1 &&
-        estacao <= 3 &&
-        (index === 0 || estacao > estacoes[index - 1])
-      );
-    });
+    const valida =
+        Array.isArray(estacoes) &&
+        estacoes.length > 0 &&
+        estacoes.length <= 3 &&
+        estacoes.every((estacao, index) => {
+            return (
+                Number.isInteger(estacao) &&
+                estacao >= 1 &&
+                estacao <= 3 &&
+                (index === 0 || estacao > estacoes[index - 1])
+            );
+        });
 
-  if (!valida) {
-    console.log("[ERRO] Rota invalida!");
-    console.log("Utilize numeros de 1 a 3 em ordem crescente.");
-    return;
-  }
+    if (!valida) {
+        console.log("[ERRO] Rota invalida!");
+        console.log("Utilize numeros de 1 a 3 em ordem crescente.");
+        return;
+    }
 
-  rotaAtual = [...estacoes];
+    rotaAtual = [...estacoes];
 
-  console.log("--------------------------------");
-  console.log("[OK] Nova rota definida:", rotaAtual);
+    // Uma nova rota ainda não possui estação atual.
+    ultimaEstacao = null;
 
-  enviarRota();
+    console.log("--------------------------------");
+    console.log("[OK] Nova rota definida:", rotaAtual);
+
+    enviarRota();
+
+    // Apaga os LEDs enquanto o AGV ainda não informou
+    // qual será a próxima estação.
+    enviarEstacaoParaLEDs(0);
 }
 
 // =====================================================
-// CONEXÃO COM O ESP32
+// IDENTIFICAÇÃO E COMUNICAÇÃO DOS ESP32
 // =====================================================
 
 server.on("connection", (socket) => {
 
-  esp32 = socket;
+    console.log("--------------------------------");
+    console.log("[CONEXAO] Novo dispositivo conectado.");
 
-  console.log("--------------------------------");
-  console.log("[OK] ESP32 conectado ao servidor!");
+    socket.on("message", (message) => {
 
-  socket.on("message", (message) => {
+        const mensagem = message.toString();
 
-    const mensagem = message.toString();
+        console.log("[RECEBIDO]", mensagem);
 
-    console.log("[RECEBIDO]", mensagem);
+        // ---------------------------------------------
+        // IDENTIFICAÇÃO DO AGV
+        // ---------------------------------------------
 
-    switch (mensagem) {
+        if (mensagem === "ESP32_CONECTADO") {
 
-      case "ESP32_CONECTADO":
+            esp32AGV = socket;
 
-        console.log("[OK] ESP32 pronto para comunicacao!");
+            console.log("[OK] ESP32 AGV identificado!");
 
-        // Se já existe uma rota, envia novamente
-        if (rotaAtual.length > 0) {
-          enviarRota();
+            if (rotaAtual.length > 0) {
+                enviarRota();
+            }
+
+            return;
         }
 
-        break;
+        // ---------------------------------------------
+        // IDENTIFICAÇÃO DO ESP32 DOS LEDs
+        // ---------------------------------------------
 
-      case "ROTA_RECEBIDA":
+        if (mensagem === "LED_ESP32_CONECTADO") {
 
-        console.log("[OK] ESP32 confirmou o recebimento da rota!");
-        console.log("[AGUARDANDO] Inicio e execucao do trajeto.");
+            esp32LEDs = socket;
 
-        break;
+            console.log("[OK] ESP32 dos LEDs identificado!");
 
-      case "ROTA_FINALIZADA":
+            // Recupera a última estação informada pelo AGV.
+            if (ultimaEstacao !== null) {
+                enviarEstacaoParaLEDs(ultimaEstacao);
+            }
 
-        console.log("[OK] AGV finalizou o trajeto!");
-
-        break;
-
-      default:
-
-        if (mensagem.startsWith("PARADA_REALIZADA:")) {
-          console.log("[OK] Parada confirmada pelo AGV:", mensagem);
+            return;
         }
 
-        break;
-    }
-  });
+        // ---------------------------------------------
+        // MENSAGENS DO AGV
+        // ---------------------------------------------
 
-  socket.on("close", () => {
+        if (socket === esp32AGV) {
 
-    console.log("[AVISO] ESP32 desconectado!");
+            if (mensagem === "ROTA_RECEBIDA") {
 
-    if (esp32 === socket) {
-      esp32 = null;
-    }
-  });
+                console.log("[OK] AGV confirmou o recebimento da rota!");
+                console.log("[AGUARDANDO] Inicio e execucao do trajeto.");
 
-  socket.on("error", (error) => {
-    console.log("[ERRO] WebSocket:", error.message);
-  });
+                return;
+            }
+
+            if (mensagem === "ROTA_FINALIZADA") {
+
+                console.log("[OK] AGV finalizou o trajeto!");
+
+                // Estoque: apaga todos os LEDs.
+                enviarEstacaoParaLEDs(0);
+
+                return;
+            }
+
+            if (mensagem.startsWith("PARADA_REALIZADA:")) {
+
+                console.log("[OK] Parada confirmada pelo AGV:", mensagem);
+
+                return;
+            }
+
+            // -----------------------------------------
+            // PRÓXIMA ESTAÇÃO
+            // -----------------------------------------
+
+            const matchEstacao = mensagem.match(/^ESTACAO:([0-3])$/);
+
+            if (matchEstacao) {
+
+                const estacao = Number(matchEstacao[1]);
+
+                console.log("[AGV] Proxima estacao:", estacao);
+
+                enviarEstacaoParaLEDs(estacao);
+
+                return;
+            }
+
+            console.log("[AVISO] Mensagem desconhecida do AGV.");
+
+            return;
+        }
+
+        // ---------------------------------------------
+        // MENSAGENS DO ESP32 DOS LEDs
+        // ---------------------------------------------
+
+        if (socket === esp32LEDs) {
+
+            console.log("[LEDs]", mensagem);
+
+            return;
+        }
+
+        // ---------------------------------------------
+        // DISPOSITIVO NÃO IDENTIFICADO
+        // ---------------------------------------------
+
+        console.log("[AVISO] Dispositivo ainda nao identificado.");
+    });
+
+    // =================================================
+    // DESCONECTAR
+    // =================================================
+
+    socket.on("close", () => {
+
+        console.log("--------------------------------");
+        console.log("[AVISO] Dispositivo desconectado.");
+
+        if (esp32AGV === socket) {
+            esp32AGV = null;
+            console.log("[AVISO] AGV desconectado!");
+        }
+
+        if (esp32LEDs === socket) {
+            esp32LEDs = null;
+            console.log("[AVISO] ESP32 dos LEDs desconectado!");
+        }
+    });
+
+    socket.on("error", (error) => {
+        console.log("[ERRO] WebSocket:", error.message);
+    });
 });
 
 // =====================================================
@@ -162,8 +278,8 @@ server.on("connection", (socket) => {
 // =====================================================
 
 const terminal = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout,
+    input: process.stdin,
+    output: process.stdout,
 });
 
 console.log("--------------------------------");
@@ -173,17 +289,17 @@ console.log("--------------------------------");
 
 function solicitarRota() {
 
-  terminal.question("Nova rota: ", (resposta) => {
+    terminal.question("Nova rota: ", (resposta) => {
 
-    const estacoes = resposta
-      .split(",")
-      .map((item) => item.trim())
-      .map((item) => /^\d+$/.test(item) ? Number(item) : NaN);
+        const estacoes = resposta
+            .split(",")
+            .map((item) => item.trim())
+            .map((item) => /^\d+$/.test(item) ? Number(item) : NaN);
 
-    definirRota(estacoes);
+        definirRota(estacoes);
 
-    solicitarRota();
-  });
+        solicitarRota();
+    });
 }
 
 solicitarRota();
