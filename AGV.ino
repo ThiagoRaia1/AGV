@@ -39,14 +39,6 @@ const int MAX_ESTACOES = 4;
 const int MARCACAO_ESTOQUE = 4;
 
 // =====================================================
-// LEDS DE STATUS DO AGV
-// =====================================================
-
-const int parado = 2;
-const int virando = 4;
-const int reto = 13;
-
-// =====================================================
 // MOTOR DIREITO
 // =====================================================
 
@@ -103,8 +95,6 @@ const unsigned long TEMPO_PARADA = 2000;
 
 void rotateMotor(int rightMotorSpeed, int leftMotorSpeed);
 
-void apagarLeds();
-
 void receberRota(uint8_t* payload, size_t length);
 
 void enviarProximaEstacao();
@@ -118,16 +108,6 @@ void webSocketEvent(
 void verificarEstacao(int rightSensor, int leftSensor);
 
 void controlarAGV();
-
-// =====================================================
-// CONTROLE DOS LEDS DO AGV
-// =====================================================
-
-void apagarLeds() {
-  digitalWrite(parado, LOW);
-  digitalWrite(virando, LOW);
-  digitalWrite(reto, LOW);
-}
 
 // =====================================================
 // ENVIA A PROXIMA ESTACAO PARA O SERVIDOR
@@ -263,7 +243,6 @@ void receberRota(uint8_t* payload, size_t length) {
   // =================================================
 
   rotateMotor(0, 0);
-  apagarLeds();
 
   rotaRecebida = true;
   estadoAGV = SEGUINDO_LINHA;
@@ -329,7 +308,6 @@ void webSocketEvent(
       estadoAGV = AGUARDANDO_ROTA;
 
       rotateMotor(0, 0);
-      apagarLeds();
 
       break;
 
@@ -438,9 +416,6 @@ void verificarEstacao(int rightSensor, int leftSensor) {
 
     rotateMotor(0, 0);
 
-    apagarLeds();
-    digitalWrite(parado, HIGH);
-
     webSocket.sendTXT(
       "PARADA_REALIZADA:" + String(destinoAtual)
     );
@@ -482,7 +457,6 @@ void controlarAGV() {
   if (!rotaRecebida || estadoAGV == AGUARDANDO_ROTA) {
 
     rotateMotor(0, 0);
-    apagarLeds();
 
     return;
   }
@@ -494,8 +468,6 @@ void controlarAGV() {
   if (estadoAGV == PARADO_NA_ESTACAO) {
 
     rotateMotor(0, 0);
-
-    digitalWrite(parado, HIGH);
 
     if (millis() - tempoInicioParada >= TEMPO_PARADA) {
 
@@ -517,14 +489,11 @@ void controlarAGV() {
         estadoAGV = AGUARDANDO_ROTA;
 
         rotateMotor(0, 0);
-        apagarLeds();
 
         return;
       }
 
       Serial.println("[INFO] Saindo da estacao...");
-
-      apagarLeds();
 
       estadoAGV = SAINDO_DA_ESTACAO;
     }
@@ -579,10 +548,6 @@ void controlarAGV() {
       emMarcacao = false;
 
       rotateMotor(MOTOR_SPEED, MOTOR_SPEED);
-
-      digitalWrite(parado, LOW);
-      digitalWrite(virando, LOW);
-      digitalWrite(reto, HIGH);
     }
 
     // -----------------------------------------------
@@ -592,10 +557,6 @@ void controlarAGV() {
     else if (rightSensor == HIGH && leftSensor == LOW) {
 
       rotateMotor(MOTOR_SPEED, -MOTOR_SPEED);
-
-      digitalWrite(parado, LOW);
-      digitalWrite(virando, HIGH);
-      digitalWrite(reto, LOW);
     }
 
     // -----------------------------------------------
@@ -605,10 +566,6 @@ void controlarAGV() {
     else if (rightSensor == LOW && leftSensor == HIGH) {
 
       rotateMotor(-MOTOR_SPEED, MOTOR_SPEED);
-
-      digitalWrite(parado, LOW);
-      digitalWrite(virando, HIGH);
-      digitalWrite(reto, LOW);
     }
   }
 }
@@ -640,12 +597,6 @@ void setup() {
 
   pinMode(IR_SENSOR_RIGHT, INPUT);
   pinMode(IR_SENSOR_LEFT, INPUT);
-
-  pinMode(parado, OUTPUT);
-  pinMode(virando, OUTPUT);
-  pinMode(reto, OUTPUT);
-
-  apagarLeds();
 
   // =================================================
   // PWM
@@ -730,7 +681,6 @@ void loop() {
     estadoAGV = AGUARDANDO_ROTA;
 
     rotateMotor(0, 0);
-    apagarLeds();
 
     return;
   }
